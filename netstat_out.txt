@@ -1,0 +1,4 @@
+  TCP    0.0.0.0:8080           0.0.0.0:0              LISTENING       2992
+  TCP    [::]:8080              [::]:0                 LISTENING       2992
+  TCP    [::1]:8080             [::1]:55870            TIME_WAIT       0
+  TCP    [::1]:55869            [::1]:8080             TIME_WAIT       0

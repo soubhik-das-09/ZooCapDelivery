@@ -1,0 +1,46 @@
+spring:
+  application:
+    name: ZooCapDelivery
+
+  data:
+    mongodb:
+      uri: mongodb+srv://soubhik:%40Soubhik09@cluster0.2jxswcu.mongodb.net/ZooCapDelivery?retryWrites=true&w=majority
+      database: ZooCapDelivery
+
+  redis:
+    host: enormous-joysome-tinsel-72624.db.redis.io
+    port: 18685
+    username: default
+    password: *****************
+    ssl:
+      enabled: true
+
+  mail:
+    host: smtp.gmail.com
+    port: 587
+    username: ********
+    password: *******
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+
+server:
+  port: 8080
+razorpay:
+  key-id: rzp_test_T7VZhMFSOI0saq
+  key-secret: U7d6ihRJrhx4nAf5TGekKc6f
+
+weather_app_api: *******
+ors:
+  api:
+    key: ********
+# AWS Credentials
+aws:
+  access-key: ***************
+  secret-key: ***************
+  region: eu-north-1
+  s3:
+    bucket: zoocap-food-images
