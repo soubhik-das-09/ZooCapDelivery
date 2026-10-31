@@ -4,7 +4,7 @@ spring:
 
   data:
     mongodb:
-      uri: 
+      uri: mongodb+srv://soubhik:<db_password>@cluster0.2jxswcu.mongodb.net/
       database: ZooCapDelivery
 
   redis:
