@@ -50,6 +50,10 @@ jobs:
           role-to-assume: arn:aws:iam::612524168786:role/GitHubActionsZooCapRole
           aws-region: eu-north-1
           role-session-name: GitHubActionsZooCapSession
+<<<<<<< HEAD
+=======
+
+>>>>>>> 353ce45 (Changed The deploy.yml file)
       # 5. Login to Amazon ECR
       - name: Login to Amazon ECR
         id: login-ecr
