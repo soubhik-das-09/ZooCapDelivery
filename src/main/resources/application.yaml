@@ -11,15 +11,15 @@ spring:
     host: enormous-joysome-tinsel-72624.db.redis.io
     port: 18685
     username: default
-    password: *****************
+    password:
     ssl:
       enabled: true
 
   mail:
     host: smtp.gmail.com
     port: 587
-    username: ********
-    password: *******
+    username:
+    password:
     properties:
       mail:
         smtp:
@@ -33,14 +33,14 @@ razorpay:
   key-id: rzp_test_T7VZhMFSOI0saq
   key-secret: U7d6ihRJrhx4nAf5TGekKc6f
 
-weather_app_api: *******
+weather_app_api:
 ors:
   api:
-    key: ********
+    key:
 # AWS Credentials
 aws:
-  access-key: ***************
-  secret-key: ***************
+  access-key: ghyueriuriogrkj
+  secret-key: kjdsjhfdiuhdfih
   region: eu-north-1
   s3:
     bucket: zoocap-food-images
