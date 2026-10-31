@@ -49,7 +49,7 @@ jobs:
         with:
           role-to-assume: arn:aws:iam::612524168786:role/GitHubActionsZooCapRole
           aws-region: eu-north-1
-          role-session-name: GitHubActionsZooCapSession
+          role-session-name: ZooCapDeployment
     
       # 5. Login to Amazon ECR
       - name: Login to Amazon ECR
