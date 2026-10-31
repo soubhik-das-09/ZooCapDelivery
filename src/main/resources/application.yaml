@@ -4,7 +4,7 @@ spring:
 
   data:
     mongodb:
-      uri: ********
+      uri: 
       database: ZooCapDelivery
 
   redis:
