@@ -45,6 +45,7 @@ public class SpringSecurity {
                         .requestMatchers(org.springframework.http.HttpMethod.OPTIONS, "/**").permitAll()
                         .requestMatchers(
                                 "/users/signup",
+                                "/users/health",
                                 "/users/login",
                                 "/users/password/forgot",
                                 "/users/password/otp/**",
