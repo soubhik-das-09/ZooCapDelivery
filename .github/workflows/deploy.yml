@@ -9,113 +9,169 @@ on:
 permissions:
   contents: read
   id-token: write
-  security-events: write
-  actions: read
 
 env:
   AWS_REGION: eu-north-1
-  ECR_REPOSITORY: zoocapdelivery
   AWS_ACCOUNT_ID: "612524168786"
-  EC2_HOST: ${{ vars.EC2_HOST }}
-  EC2_USER: ubuntu
+  ECR_REPOSITORY: zoocapdelivery
+  LAUNCH_TEMPLATE_NAME: ZooCap-ASG-Template
+  ASG_NAME: ZooCap-ASG
 
 jobs:
   build-and-deploy:
-    name: Build, Push and Deploy
+    name: Build, Push and Deploy to ASG
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Checkout source code
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 2. Set up Java
-      - name: Set up Java 21
+      - name: Set up Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "21"
           cache: maven
 
-      # 3. Build Spring Boot JAR
-      - name: Build JAR
+      - name: Build Spring Boot JAR
         run: |
           chmod +x mvnw
           ./mvnw clean package -DskipTests
-      - name: Debug GitHub OIDC claims
-        uses: actions/github-script@v7
-        with:
-         script: |
-          const token = await core.getIDToken('sts.amazonaws.com');
-          const payload = JSON.parse(
-          Buffer.from(token.split('.')[1], 'base64url').toString()
-          );
 
-          core.info(`Issuer: ${payload.iss}`);
-          core.info(`Audience: ${JSON.stringify(payload.aud)}`);
-          core.info(`Subject: ${payload.sub}`);
-
-      - name: Debug GitHub OIDC context
-        run: |
-          echo "Repository: $GITHUB_REPOSITORY"
-          echo "Ref: $GITHUB_REF"
-          echo "Event: $GITHUB_EVENT_NAME"
-          echo "Actor: $GITHUB_ACTOR"
-          echo "Job: $GITHUB_JOB"
-
-      # 4. Configure AWS using GitHub OIDC
-      - name: Configure AWS credentials
+      - name: Configure AWS credentials using OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: eu-north-1
+          aws-region: ${{ env.AWS_REGION }}
 
-    
-      # 5. Login to Amazon ECR
       - name: Login to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      # 6. Build and push Docker image
       - name: Build and push Docker image
         env:
           REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           IMAGE_TAG: ${{ github.sha }}
         run: |
-          docker build -t $REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
-          docker push $REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          docker build -t "$REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" .
+          docker push "$REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
 
-      # 7. Deploy image to EC2
-      - name: Deploy to EC2
-        uses: appleboy/ssh-action@v1.2.0
+      - name: Create new Launch Template version
         env:
-          AWS_REGION: ${{ env.AWS_REGION }}
-          AWS_ACCOUNT_ID: ${{ env.AWS_ACCOUNT_ID }}
           IMAGE_TAG: ${{ github.sha }}
-          ECR_REPOSITORY: ${{ env.ECR_REPOSITORY }}
-        with:
-          host: ${{ vars.EC2_HOST }}
-          username: ubuntu
-          key: ${{ secrets.EC2_SSH_KEY }}
-          envs: AWS_REGION,AWS_ACCOUNT_ID,IMAGE_TAG,ECR_REPOSITORY
-          script: |
-            set -e
+        run: |
+          set -euo pipefail
 
-            REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
-            IMAGE="${REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}"
+          REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+          IMAGE="${REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}"
 
-            aws ecr get-login-password --region "$AWS_REGION" \
-              | sudo docker login --username AWS --password-stdin "$REGISTRY"
+          # Get the existing Launch Template configuration.
+          aws ec2 describe-launch-template-versions \
+            --launch-template-name "$LAUNCH_TEMPLATE_NAME" \
+            --versions '$Latest' \
+            --query 'LaunchTemplateVersions[0].LaunchTemplateData' \
+            --output json > launch-template-data.json
 
-            sudo docker pull "$IMAGE"
+          # Create the startup script for new ASG instances.
+          cat > user-data.sh <<EOF
+          #!/bin/bash
+          set -euxo pipefail
+          exec > >(tee -a /var/log/zoocap-user-data.log) 2>&1
 
-            sudo docker stop zoocap || true
-            sudo docker rm zoocap || true
+          apt-get update -y
+          apt-get install -y docker.io awscli
 
-            sudo docker run -d \
-              --name zoocap \
-              --restart unless-stopped \
-              -p 8080:8080 \
-              "$IMAGE"
+          systemctl enable docker
+          systemctl start docker
 
-            sudo docker image prune -f
+          aws ecr get-login-password --region ${AWS_REGION} \
+            | docker login --username AWS --password-stdin ${REGISTRY}
+
+          docker pull ${IMAGE}
+
+          docker stop zoocap || true
+          docker rm zoocap || true
+
+          docker run -d \
+            --name zoocap \
+            --restart unless-stopped \
+            -p 8080:8080 \
+            ${IMAGE}
+          EOF
+
+          # Encode User Data and preserve the rest of the Launch Template.
+          USER_DATA=$(base64 -w 0 user-data.sh)
+
+          jq --arg userData "$USER_DATA" \
+            '.UserData = $userData' \
+            launch-template-data.json > updated-launch-template-data.json
+
+          # Create a new version based on the existing configuration.
+          aws ec2 create-launch-template-version \
+            --launch-template-name "$LAUNCH_TEMPLATE_NAME" \
+            --source-version '$Latest' \
+            --version-description "GitHub Actions deployment ${IMAGE_TAG}" \
+            --launch-template-data file://updated-launch-template-data.json
+
+      - name: Update Auto Scaling Group Launch Template
+        run: |
+          set -euo pipefail
+
+          NEW_VERSION=$(aws ec2 describe-launch-template-versions \
+            --launch-template-name "$LAUNCH_TEMPLATE_NAME" \
+            --versions '$Latest' \
+            --query 'LaunchTemplateVersions[0].VersionNumber' \
+            --output text)
+
+          echo "Using Launch Template version: $NEW_VERSION"
+
+          aws autoscaling update-auto-scaling-group \
+            --auto-scaling-group-name "$ASG_NAME" \
+            --launch-template "LaunchTemplateName=${LAUNCH_TEMPLATE_NAME},Version=${NEW_VERSION}"
+
+      - name: Start Auto Scaling Instance Refresh
+        id: refresh
+        run: |
+          set -euo pipefail
+
+          REFRESH_ID=$(aws autoscaling start-instance-refresh \
+            --auto-scaling-group-name "$ASG_NAME" \
+            --preferences '{
+              "MinHealthyPercentage": 100,
+              "MaxHealthyPercentage": 200,
+              "InstanceWarmup": 300,
+              "SkipMatching": true
+            }' \
+            --query 'InstanceRefreshId' \
+            --output text)
+
+          echo "Instance Refresh ID: $REFRESH_ID"
+          echo "REFRESH_ID=$REFRESH_ID" >> "$GITHUB_ENV"
+
+      - name: Wait for Instance Refresh
+        run: |
+          set -euo pipefail
+
+          while true; do
+            STATUS=$(aws autoscaling describe-instance-refreshes \
+              --auto-scaling-group-name "$ASG_NAME" \
+              --instance-refresh-ids "$REFRESH_ID" \
+              --query 'InstanceRefreshes[0].Status' \
+              --output text)
+
+            echo "Instance Refresh status: $STATUS"
+
+            case "$STATUS" in
+              Successful)
+                echo "Deployment completed successfully."
+                break
+                ;;
+              Failed|Cancelled|RollbackFailed)
+                echo "Deployment failed with status: $STATUS"
+                exit 1
+                ;;
+              *)
+                sleep 30
+                ;;
+            esac
+          done
